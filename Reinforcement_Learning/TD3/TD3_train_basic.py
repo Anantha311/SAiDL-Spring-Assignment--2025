@@ -191,4 +191,4 @@ torch.save({
     'critic_target': agent.critic_target.state_dict(),
     'actor_optimizer': agent.actor_optimizer.state_dict(),
     'critic_optimizer': agent.critic_optimizer.state_dict(),
-}, "td3_checkpoint.pth")
+}, "td3_basic.pth")
