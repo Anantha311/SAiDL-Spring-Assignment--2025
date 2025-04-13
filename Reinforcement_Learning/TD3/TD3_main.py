@@ -13,7 +13,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class NoisyLinear(nn.Module): # Making a Linear neural network which has noise
-    def __init__(self, in_features, out_features, std_init=0.1,initial_decay_noise = 1,noise_dist='gamma' ):
+    def __init__(self, in_features, out_features, std_init=0.1,initial_decay_noise = 1,noise_dist='gamma', noise_multiplier = 0.2 ):
         super(NoisyLinear, self).__init__()
         self.in_features = in_features # This is number of input parameter
         self.out_features = out_features # This is number of input parameter
@@ -27,6 +27,7 @@ class NoisyLinear(nn.Module): # Making a Linear neural network which has noise
         self.bias_sigma = nn.Parameter(torch.empty(out_features))
         self.register_buffer("bias_epsilon", torch.empty(out_features))
         self.noise_dist = noise_dist
+        self.noise_multiplier = noise_multiplier
 
         self.reset_parameters()
         self.reset_noise()
@@ -40,8 +41,8 @@ class NoisyLinear(nn.Module): # Making a Linear neural network which has noise
     def reset_noise(self):
         # #Truncated normal noise with controlled variance
         if self.noise_dist == 'gaussian':
-            weight_noise = torch.randn_like(self.weight_epsilon)
-            bias_noise = torch.randn_like(self.bias_epsilon) 
+            weight_noise = torch.randn_like(self.weight_epsilon) * self.noise_multiplier
+            bias_noise = torch.randn_like(self.bias_epsilon) * self.noise_multiplier
 
         elif self.noise_dist == 'beta':
             # Beta distribution (symmetric version)
@@ -49,8 +50,8 @@ class NoisyLinear(nn.Module): # Making a Linear neural network which has noise
                 torch.tensor([2.0], device=self.weight_epsilon.device),
                 torch.tensor([2.0], device=self.weight_epsilon.device)
             )
-            weight_noise = beta_dist.sample(self.weight_epsilon.shape).squeeze() - 0.5  
-            bias_noise = beta_dist.sample(self.bias_epsilon.shape).squeeze() - 0.5 
+            weight_noise = (beta_dist.sample(self.weight_epsilon.shape).squeeze() - 0.5 ) * self.noise_multiplier
+            bias_noise = (beta_dist.sample(self.bias_epsilon.shape).squeeze() - 0.5 ) * self.noise_multiplier
 
         elif self.noise_dist == 'gamma':
             # Centered gamma distribution
@@ -63,13 +64,13 @@ class NoisyLinear(nn.Module): # Making a Linear neural network which has noise
                 torch.tensor([2.0], device=device),
                 torch.tensor([1.0], device=device)
             ).sample((self.out_features, self.in_features)).squeeze()
-            weight_noise = (g1 - g2) / 2.0
-            bias_noise = (g1.mean(dim=1) - g2.mean(dim=1)) / 2.0  # For bias [out_features]
+            weight_noise = ((g1 - g2) / 2.0) * self.noise_multiplier
+            bias_noise = ((g1.mean(dim=1) - g2.mean(dim=1)) / 2.0 ) * self.noise_multiplier # For bias [out_features]
 
         elif self.noise_dist == 'uniform':
             # Uniform distribution between a specified range
-            weight_noise = torch.empty_like(self.weight_epsilon).uniform_(-1.0, 1.0)
-            bias_noise = torch.empty_like(self.bias_epsilon).uniform_(-0.5, 0.5)
+            weight_noise = (torch.empty_like(self.weight_epsilon).uniform_(-1.0, 1.0)) * self.noise_multiplier
+            bias_noise = (torch.empty_like(self.bias_epsilon).uniform_(-0.5, 0.5)) * self.noise_multiplier
 
         elif self.noise_dist == 'laplace':
             # Laplace distribution (double exponential)
@@ -77,8 +78,8 @@ class NoisyLinear(nn.Module): # Making a Linear neural network which has noise
                 torch.tensor([0.0], device=self.weight_epsilon.device),
                 torch.tensor([1.0], device=self.weight_epsilon.device)
             )
-            weight_noise = laplace.sample(self.weight_epsilon.shape).squeeze()
-            bias_noise = laplace.sample(self.bias_epsilon.shape).squeeze()
+            weight_noise = (laplace.sample(self.weight_epsilon.shape).squeeze() ) * self.noise_multiplier
+            bias_noise = (laplace.sample(self.bias_epsilon.shape).squeeze()) * self.noise_multiplier
 
         elif self.noise_dist == 'exponential':
             # Exponential distribution (shifted to center around zero)
@@ -86,8 +87,8 @@ class NoisyLinear(nn.Module): # Making a Linear neural network which has noise
                 torch.tensor([1.0], device=self.weight_epsilon.device)
             )
             # Subtracting the mean (1.0) centers the noise around zero.
-            weight_noise = exponential.sample(self.weight_epsilon.shape).squeeze() - 1.0
-            bias_noise = exponential.sample(self.bias_epsilon.shape).squeeze() - 1.0
+            weight_noise = (exponential.sample(self.weight_epsilon.shape).squeeze() - 1.0) * self.noise_multiplier
+            bias_noise = (exponential.sample(self.bias_epsilon.shape).squeeze() - 1.0) * self.noise_multiplier
 
         elif self.noise_dist == 'cauchy':
             # Cauchy distribution, which has heavy tails
@@ -95,8 +96,8 @@ class NoisyLinear(nn.Module): # Making a Linear neural network which has noise
                 torch.tensor([0.0], device=self.weight_epsilon.device),
                 torch.tensor([1.0], device=self.weight_epsilon.device)
             )
-            weight_noise = cauchy.sample(self.weight_epsilon.shape).squeeze()
-            bias_noise = cauchy.sample(self.bias_epsilon.shape).squeeze()
+            weight_noise = (cauchy.sample(self.weight_epsilon.shape).squeeze()) * self.noise_multiplier
+            bias_noise = (cauchy.sample(self.bias_epsilon.shape).squeeze()) * self.noise_multiplier
 
         elif self.noise_dist == 'student_t':
             # Student's T distribution, useful when expecting heavier tails than Gaussian
@@ -104,8 +105,8 @@ class NoisyLinear(nn.Module): # Making a Linear neural network which has noise
             student_t = torch.distributions.StudentT(
                 torch.tensor([3.0], device=self.weight_epsilon.device)
             )
-            weight_noise = student_t.sample(self.weight_epsilon.shape).squeeze()
-            bias_noise = student_t.sample(self.bias_epsilon.shape).squeeze()
+            weight_noise = (student_t.sample(self.weight_epsilon.shape).squeeze()) * self.noise_multiplier
+            bias_noise = (student_t.sample(self.bias_epsilon.shape).squeeze()) * self.noise_multiplier
 
         # Clamp the generated noise to keep it within desired bounds.
         self.bias_epsilon.data = bias_noise.clamp(-1.0, 1.0)
@@ -220,11 +221,7 @@ class TD3Agent:
                 self.actor.reset_noise()
             
             return np.clip(action, -self.max_action, self.max_action)
-    def update_noise(self):
-        progress = min(1.0, self.total_steps / 1e5)
-        for layer in self.actor.net:
-            if isinstance(layer, NoisyLinear):
-                layer.weight_sigma.data *= (1 - progress)  # Decay noise over time
+
 
 class ReplayBuffer:
     def __init__(self, capacity, n_step=3, gamma=0.99,device='cuda'):
@@ -302,7 +299,7 @@ reward_history_student_t_avg =  []
 
 noise_configs = [
     {'name': 'Gaussian', 'params': {'noise_dist': 'gaussian'}},
-    {'name': 'Beta(2,5)', 'params': {'noise_dist': 'beta'}},
+    {'name': 'Beta(2,2)', 'params': {'noise_dist': 'beta'}},
     {'name': 'Gamma(2,1)', 'params': {'noise_dist': 'gamma'}},
     {'name': 'Uniform', 'params': {'noise_dist': 'uniform'}},
     {'name': 'Laplace(0,1)', 'params': {'noise_dist': 'laplace'}},
@@ -311,6 +308,7 @@ noise_configs = [
     {'name': 'Student_t', 'params': {'noise_dist': 'student_t'}}
     
 ]
+
 avg_no = 50
 for config in noise_configs:
     metrics = {
@@ -325,7 +323,7 @@ for config in noise_configs:
     capacity = 50000
     batch_size = 256
     replay_buffer = ReplayBuffer(capacity=capacity)
-    for episode in range(num_episodes):
+    for episode in range(1,num_episodes + 1):
         state, _ = env.reset()
         done = False
         episode_reward = 0
@@ -392,7 +390,7 @@ for config in noise_configs:
         if config['name'] == "Gaussian":
             reward_history_gaussian.append(episode_reward)
  # # np.mean(reward_history[-100:]) calculates the average (mean) of the last 100 elements in the reward_history list.
-        elif config['name'] == "Beta(2,5)":
+        elif config['name'] == "Beta(2,2)":
             reward_history_beta.append(episode_reward)     
         elif config['name'] == "Gamma(2,1)":
             reward_history_gamma.append(episode_reward)   
@@ -412,7 +410,7 @@ for config in noise_configs:
             if config['name'] == "Gaussian":
                 avg_reward = np.mean(reward_history_gaussian[-avg_no:])
                 reward_history_gaussian_avg.append(avg_reward )# np.mean(reward_history[-100:]) calculates the average (mean) of the last 100 elements in the reward_history list.
-            elif config['name'] == "Beta(2,5)":
+            elif config['name'] == "Beta(2,2)":
                 avg_reward = np.mean(reward_history_beta[-avg_no:])
                 reward_history_beta_avg.append(np.mean(avg_reward))
             elif config['name'] == "Gamma(2,1)":
@@ -434,7 +432,7 @@ for config in noise_configs:
                 avg_reward = np.mean(reward_history_student_t[-avg_no:])
                 reward_history_student_t_avg.append(avg_reward)     
 
-            print(f"Episode {episode + 1}, Avg Reward: {avg_reward}, total Steps:{total_steps}")
+            print(f"Episode {episode}, Avg Reward: {avg_reward}, total Steps:{total_steps}")
             #print(f"Current Noise Level: {noise:.2f}")
     metrics_path = f"weights/td3_main_{config['name']}" 
     os.makedirs(metrics_path ,exist_ok=True) 
@@ -456,9 +454,9 @@ for config in noise_configs:
 
 
 # Plot learning progress
-x_range = [i * avg_no for i in range(len(reward_history_gaussian_avg))]
+x_range = [((i  * avg_no)) for i in range(len(reward_history_gaussian_avg))]
 plt.plot(x_range,reward_history_gaussian_avg,label="Gaussian")
-plt.plot(x_range,reward_history_beta_avg,label = "Beta(2,5)")
+plt.plot(x_range,reward_history_beta_avg,label = "Beta(2,2)")
 plt.plot(x_range,reward_history_gamma_avg,label="Gamma(2,1)")
 plt.plot(x_range,reward_history_uniform_avg,label="Uniform")
 plt.plot(x_range,reward_history_laplace_avg,label = "Laplace(0,1)")
@@ -468,7 +466,7 @@ plt.plot(x_range,reward_history_student_t_avg,label = "Student_t")
 plt.legend() 
 plt.title(f"TD3 Learning Progress")
 plt.xlabel("Episodes")
-plt.ylabel("Reward")
+plt.ylabel("Rewards")
 plt.savefig(fig_path)
 
 
